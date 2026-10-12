@@ -1774,8 +1774,12 @@ query "vpc_security_group_allows_ingress_authorized_ports" {
         aws_vpc_security_group_rule
       where
         type = 'ingress'
-        and cidr_ipv4 = '0.0.0.0/0'
-        and (from_port is null or from_port not in (80,443))
+        and (cidr_ipv4 = '0.0.0.0/0' or cidr_ipv6 = '::/0')
+        and not (
+          ip_protocol in ('tcp', '6')
+          and from_port = to_port
+          and from_port in (80, 443)
+        )
       group by
         group_id
     )
@@ -1786,8 +1790,8 @@ query "vpc_security_group_allows_ingress_authorized_ports" {
         else 'ok'
       end as status,
       case
-        when ingress_unauthorized_ports.count > 0 then sg.title || ' having unrestricted incoming traffic other than default ports from 0.0.0.0/0 '
-        else sg.title || ' allows unrestricted incoming traffic for authorized default ports (80,443).'
+        when ingress_unauthorized_ports.count > 0 then sg.title || ' has ' || ingress_unauthorized_ports.count || ' rule(s) allowing unrestricted incoming traffic other than TCP 80 and 443 from 0.0.0.0/0 or ::/0.'
+        else sg.title || ' allows unrestricted incoming traffic only on authorized ports (TCP 80, 443).'
       end as reason
       ${local.tag_dimensions_sql}
       ${replace(local.common_dimensions_qualifier_sql, "__QUALIFIER__", "sg.")}

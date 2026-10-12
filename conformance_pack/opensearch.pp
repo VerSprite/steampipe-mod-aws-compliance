@@ -4,6 +4,12 @@ locals {
   })
 }
 
+variable "opensearch_domain_tls_1_2_security_policies" {
+  type        = list(string)
+  description = "OpenSearch domain TLS security policies that allow only TLS 1.2 or newer."
+  default     = ["Policy-Min-TLS-1-2-2019-07", "Policy-Min-TLS-1-2-PFS-2023-10", "Policy-Min-TLS-1-2-RFC9151-FIPS-2024-08"]
+}
+
 control "opensearch_domain_data_node_fault_tolerance" {
   title       = "OpenSearch domains should have at least three data nodes"
   description = "This control checks whether OpenSearch domains are configured with at least three data nodes and zoneAwarenessEnabled is true. This control fails for an OpenSearch domain if instanceCount is less than 3 or zoneAwarenessEnabled is false."
@@ -197,18 +203,25 @@ query "opensearch_domain_https_required" {
     select
       arn as resource,
       case
-        when (domain_endpoint_options ->> 'EnforceHTTPS' = 'false') or (domain_endpoint_options ->> 'EnforceHTTPS' = 'true' and domain_endpoint_options ->> 'TLSSecurityPolicy' not in ('tlsPolicies')) then 'alarm'
-        else 'ok'
+        when coalesce(domain_endpoint_options ->> 'EnforceHTTPS', 'false') <> 'true' then 'alarm'
+        when domain_endpoint_options ->> 'TLSSecurityPolicy' = any($1::text[]) then 'ok'
+        else 'alarm'
       end status,
       case
-        when (domain_endpoint_options ->> 'EnforceHTTPS' = 'false') or (domain_endpoint_options ->> 'EnforceHTTPS' = 'true' and domain_endpoint_options ->> 'TLSSecurityPolicy' not in ('tlsPolicies')) then title || ' does not use HTTPS.'
-        else title || ' uses HTTPS.'
+        when coalesce(domain_endpoint_options ->> 'EnforceHTTPS', 'false') <> 'true' then title || ' does not enforce HTTPS.'
+        when domain_endpoint_options ->> 'TLSSecurityPolicy' = any($1::text[]) then title || ' enforces HTTPS with TLS 1.2 or newer.'
+        else title || ' enforces HTTPS, but its TLS policy ' || coalesce(domain_endpoint_options ->> 'TLSSecurityPolicy', 'none') || ' allows TLS older than 1.2.'
       end as reason
       ${local.tag_dimensions_sql}
       ${local.common_dimensions_sql}
     from
       aws_opensearch_domain;
   EOQ
+
+  param "opensearch_domain_tls_1_2_security_policies" {
+    description = "OpenSearch domain TLS security policies that allow only TLS 1.2 or newer."
+    default     = var.opensearch_domain_tls_1_2_security_policies
+  }
 }
 
 query "opensearch_domain_audit_logging_enabled" {
@@ -216,11 +229,13 @@ query "opensearch_domain_audit_logging_enabled" {
     select
       arn as resource,
       case
-        when log_publishing_options -> 'AUDIT_LOGS' ->> 'Enabled' = 'true' then 'ok'
-        else 'ok'
+        when log_publishing_options -> 'AUDIT_LOGS' ->> 'Enabled' = 'true'
+          and log_publishing_options -> 'AUDIT_LOGS' ->> 'CloudWatchLogsLogGroupArn' is not null then 'ok'
+        else 'alarm'
       end as status,
       case
-        when log_publishing_options -> 'AUDIT_LOGS' ->> 'Enabled' = 'true' then title || ' audit logging enabled.'
+        when log_publishing_options -> 'AUDIT_LOGS' ->> 'Enabled' = 'true'
+          and log_publishing_options -> 'AUDIT_LOGS' ->> 'CloudWatchLogsLogGroupArn' is not null then title || ' audit logging enabled.'
         else title || ' audit logging disabled.'
       end as reason
       ${local.tag_dimensions_sql}
@@ -414,11 +429,11 @@ query "opensearch_domain_data_node_fault_tolerance" {
     select
       arn as resource,
       case
-        when cluster_config ->> 'ZoneAwarenessEnabled' = 'true' and cluster_config ->> 'InstanceCount' > '2' then 'ok'
+        when cluster_config ->> 'ZoneAwarenessEnabled' = 'true' and (cluster_config ->> 'InstanceCount')::integer > 2 then 'ok'
         else 'alarm'
       end as status,
       case
-        when cluster_config ->> 'ZoneAwarenessEnabled' = 'true' and cluster_config ->> 'InstanceCount' > '2' then title || ' zone awareness is '
+        when cluster_config ->> 'ZoneAwarenessEnabled' = 'true' and (cluster_config ->> 'InstanceCount')::integer > 2 then title || ' zone awareness is '
         || case when cluster_config ->> 'ZoneAwarenessEnabled' = 'true' then 'enabled' else 'disabled' end || ' with ' || (cluster_config ->> 'InstanceCount') || ' data node(s) configued.'
         else title || ' zone awareness is ' || case when cluster_config ->> 'ZoneAwarenessEnabled' = 'true' then 'enabled' else 'disabled' end || ' with ' || (cluster_config ->> 'InstanceCount') || ' data node(s) configued.'
       end as reason

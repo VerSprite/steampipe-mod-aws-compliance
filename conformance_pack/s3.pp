@@ -647,24 +647,29 @@ query "s3_bucket_restrict_public_read_access" {
     )
     select
       b.arn as resource,
+      -- Block Public Access: ignore_public_acls / restrict_public_buckets (bucket or account) neutralise existing public
+      -- ACLs and policies; block_public_acls / block_public_policy only stop new ones, so they don't count here.
       case
-        when (block_public_acls or a.name is null) and not bucket_policy_is_public then 'ok'
-        when (block_public_acls or a.name is null) and (bucket_policy_is_public and block_public_policy) then 'ok'
-        when (block_public_acls or a.name is null) and (bucket_policy_is_public and p.name is null) then 'ok'
-        else 'alarm'
+        when a.name is not null and not (coalesce(b.ignore_public_acls, false) or coalesce(s.ignore_public_acls, false)) then 'alarm'
+        when p.name is not null and b.bucket_policy_is_public
+          and not (coalesce(b.restrict_public_buckets, false) or coalesce(s.restrict_public_buckets, false)) then 'alarm'
+        else 'ok'
       end as status,
       case
-        when (block_public_acls or a.name is null) and not bucket_policy_is_public then b.title || ' not publicly readable.'
-        when (block_public_acls or a.name is null) and (bucket_policy_is_public and block_public_policy) then b.title || ' not publicly readable.'
-        when (block_public_acls or a.name is null) and (bucket_policy_is_public and p.name is null) then  b.title || ' not publicly readable.'
-        else b.title || ' publicly readable.'
+        when a.name is not null and not (coalesce(b.ignore_public_acls, false) or coalesce(s.ignore_public_acls, false))
+          then b.title || ' publicly readable through its ACL.'
+        when p.name is not null and b.bucket_policy_is_public
+          and not (coalesce(b.restrict_public_buckets, false) or coalesce(s.restrict_public_buckets, false))
+          then b.title || ' publicly readable through its bucket policy.'
+        else b.title || ' not publicly readable.'
       end as reason
       ${local.tag_dimensions_sql}
       ${replace(local.common_dimensions_qualifier_sql, "__QUALIFIER__", "b.")}
     from
       aws_s3_bucket as b
       left join public_acl as a on b.name = a.name
-      left join read_access_policy as p on b.name = p.name;
+      left join read_access_policy as p on b.name = p.name
+      left join aws_s3_account_settings as s on s.account_id = b.account_id;
   EOQ
 }
 
@@ -711,24 +716,29 @@ query "s3_bucket_restrict_public_write_access" {
     )
     select
       b.arn as resource,
+      -- Block Public Access: ignore_public_acls / restrict_public_buckets (bucket or account) neutralise existing public
+      -- ACLs and policies; block_public_acls / block_public_policy only stop new ones, so they don't count here.
       case
-        when (block_public_acls or a.name is null) and not bucket_policy_is_public then 'ok'
-        when (block_public_acls or a.name is null) and (bucket_policy_is_public and block_public_policy) then 'ok'
-        when bucket_policy_is_public and p.name is null then 'ok'
-        else 'alarm'
-      end status,
+        when a.name is not null and not (coalesce(b.ignore_public_acls, false) or coalesce(s.ignore_public_acls, false)) then 'alarm'
+        when p.name is not null and b.bucket_policy_is_public
+          and not (coalesce(b.restrict_public_buckets, false) or coalesce(s.restrict_public_buckets, false)) then 'alarm'
+        else 'ok'
+      end as status,
       case
-        when (block_public_acls or a.name is null ) and not bucket_policy_is_public then b.title || ' not publicly writable.'
-        when (block_public_acls or a.name is null) and (bucket_policy_is_public and block_public_policy) then b.title || ' not publicly writable.'
-        when (block_public_acls or a.name is null) and (bucket_policy_is_public and p.name is null) then b.title || ' not publicly writable.'
-        else b.title || ' publicly writable.'
-      end reason
+        when a.name is not null and not (coalesce(b.ignore_public_acls, false) or coalesce(s.ignore_public_acls, false))
+          then b.title || ' publicly writable through its ACL.'
+        when p.name is not null and b.bucket_policy_is_public
+          and not (coalesce(b.restrict_public_buckets, false) or coalesce(s.restrict_public_buckets, false))
+          then b.title || ' publicly writable through its bucket policy.'
+        else b.title || ' not publicly writable.'
+      end as reason
       ${local.tag_dimensions_sql}
       ${replace(local.common_dimensions_qualifier_sql, "__QUALIFIER__", "b.")}
     from
       aws_s3_bucket as b
       left join public_acl as a on b.name = a.name
-      left join write_access_policy as p on b.name = p.name;
+      left join write_access_policy as p on b.name = p.name
+      left join aws_s3_account_settings as s on s.account_id = b.account_id;
   EOQ
 }
 

@@ -706,11 +706,9 @@ query "cloudtrail_trail_bucket_mfa_enabled" {
 
 query "cloudtrail_s3_object_read_events_audit_enabled" {
   sql = <<-EOQ
-    with s3_selectors as
-    (
+    with classic_selectors as (
+      -- Classic event selectors logging S3 object read events: the bucket ARNs or prefixes they cover.
       select
-        name as trail_name,
-        is_multi_region_trail,
         bucket_selector
       from
         aws_cloudtrail_trail,
@@ -720,42 +718,74 @@ query "cloudtrail_s3_object_read_events_audit_enabled" {
       where
         is_multi_region_trail
         and data_resource ->> 'Type' = 'AWS::S3::Object'
-        and event_selector ->> 'ReadWriteType' in
-        (
-          'ReadOnly',
-          'All'
+        and event_selector ->> 'ReadWriteType' in ('ReadOnly', 'All')
+    ), advanced_selectors as (
+      -- Advanced event selectors logging S3 object data events, read ones included (readOnly absent or 'true').
+      select
+        selector -> 'FieldSelectors' as field_selectors
+      from
+        aws_cloudtrail_trail,
+        jsonb_array_elements(advanced_event_selectors) as selector
+      where
+        is_multi_region_trail
+        and exists (select 1 from jsonb_array_elements(selector -> 'FieldSelectors') as f
+                    where f ->> 'Field' = 'eventCategory' and f -> 'Equals' ? 'Data')
+        and exists (select 1 from jsonb_array_elements(selector -> 'FieldSelectors') as f
+                    where f ->> 'Field' = 'resources.type' and f -> 'Equals' ? 'AWS::S3::Object')
+        and not exists (select 1 from jsonb_array_elements(selector -> 'FieldSelectors') as f
+                        where f ->> 'Field' = 'readOnly' and not (f -> 'Equals' ? 'true'))
+    ), logged_buckets as (
+      select
+        b.arn
+      from
+        aws_s3_bucket as b
+      where
+        -- "arn:aws:s3" (or "arn:aws:s3:::") selects every bucket; otherwise the bucket itself or a prefix in it.
+        -- Matched on "<bucket>/" so a selector for bucket "foobar" doesn't count for bucket "foo".
+        exists (select 1 from classic_selectors as c
+                where c.bucket_selector in ('arn:aws:s3', 'arn:aws:s3:::')
+                  or c.bucket_selector = b.arn
+                  or c.bucket_selector like b.arn || '/%')
+        or exists (
+          select 1
+          from advanced_selectors as a
+          where
+            (
+              -- No resources.ARN condition: every bucket.
+              not exists (select 1 from jsonb_array_elements(a.field_selectors) as f
+                          where f ->> 'Field' = 'resources.ARN' and (f ? 'StartsWith' or f ? 'Equals'))
+              or exists (select 1 from jsonb_array_elements(a.field_selectors) as f,
+                           jsonb_array_elements_text(coalesce(f -> 'StartsWith', '[]') || coalesce(f -> 'Equals', '[]')) as v
+                         where f ->> 'Field' = 'resources.ARN' and ((b.arn || '/') like v || '%' or v like b.arn || '/%'))
+            )
+            and not exists (select 1 from jsonb_array_elements(a.field_selectors) as f,
+                              jsonb_array_elements_text(coalesce(f -> 'NotStartsWith', '[]')) as v
+                            where f ->> 'Field' = 'resources.ARN' and (b.arn || '/') like v || '%')
         )
     )
     select
       b.arn as resource,
       case
-        when count(bucket_selector) > 0 then 'ok'
+        when l.arn is not null then 'ok'
         else 'alarm'
       end as status,
       case
-        when count(bucket_selector) > 0 then b.name || ' object-level read events logging enabled.'
+        when l.arn is not null then b.name || ' object-level read events logging enabled.'
         else b.name || ' object-level read events logging disabled.'
       end as reason
       ${local.tag_dimensions_sql}
       ${local.common_dimensions_sql}
     from
       aws_s3_bucket as b
-      left join
-        s3_selectors
-        on bucket_selector like (b.arn || '%')
-        or bucket_selector = 'arn:aws:s3'
-    group by
-      b.account_id, b.region, b.arn, b.name, b.tags, b._ctx;
+      left join logged_buckets as l on l.arn = b.arn;
   EOQ
 }
 
 query "cloudtrail_s3_object_write_events_audit_enabled" {
   sql = <<-EOQ
-    with s3_selectors as
-    (
+    with classic_selectors as (
+      -- Classic event selectors logging S3 object write events: the bucket ARNs or prefixes they cover.
       select
-        name as trail_name,
-        is_multi_region_trail,
         bucket_selector
       from
         aws_cloudtrail_trail,
@@ -765,32 +795,66 @@ query "cloudtrail_s3_object_write_events_audit_enabled" {
       where
         is_multi_region_trail
         and data_resource ->> 'Type' = 'AWS::S3::Object'
-        and event_selector ->> 'ReadWriteType' in
-        (
-          'WriteOnly',
-          'All'
+        and event_selector ->> 'ReadWriteType' in ('WriteOnly', 'All')
+    ), advanced_selectors as (
+      -- Advanced event selectors logging S3 object data events, write ones included (readOnly absent or 'false').
+      select
+        selector -> 'FieldSelectors' as field_selectors
+      from
+        aws_cloudtrail_trail,
+        jsonb_array_elements(advanced_event_selectors) as selector
+      where
+        is_multi_region_trail
+        and exists (select 1 from jsonb_array_elements(selector -> 'FieldSelectors') as f
+                    where f ->> 'Field' = 'eventCategory' and f -> 'Equals' ? 'Data')
+        and exists (select 1 from jsonb_array_elements(selector -> 'FieldSelectors') as f
+                    where f ->> 'Field' = 'resources.type' and f -> 'Equals' ? 'AWS::S3::Object')
+        and not exists (select 1 from jsonb_array_elements(selector -> 'FieldSelectors') as f
+                        where f ->> 'Field' = 'readOnly' and not (f -> 'Equals' ? 'false'))
+    ), logged_buckets as (
+      select
+        b.arn
+      from
+        aws_s3_bucket as b
+      where
+        -- "arn:aws:s3" (or "arn:aws:s3:::") selects every bucket; otherwise the bucket itself or a prefix in it.
+        -- Matched on "<bucket>/" so a selector for bucket "foobar" doesn't count for bucket "foo".
+        exists (select 1 from classic_selectors as c
+                where c.bucket_selector in ('arn:aws:s3', 'arn:aws:s3:::')
+                  or c.bucket_selector = b.arn
+                  or c.bucket_selector like b.arn || '/%')
+        or exists (
+          select 1
+          from advanced_selectors as a
+          where
+            (
+              -- No resources.ARN condition: every bucket.
+              not exists (select 1 from jsonb_array_elements(a.field_selectors) as f
+                          where f ->> 'Field' = 'resources.ARN' and (f ? 'StartsWith' or f ? 'Equals'))
+              or exists (select 1 from jsonb_array_elements(a.field_selectors) as f,
+                           jsonb_array_elements_text(coalesce(f -> 'StartsWith', '[]') || coalesce(f -> 'Equals', '[]')) as v
+                         where f ->> 'Field' = 'resources.ARN' and ((b.arn || '/') like v || '%' or v like b.arn || '/%'))
+            )
+            and not exists (select 1 from jsonb_array_elements(a.field_selectors) as f,
+                              jsonb_array_elements_text(coalesce(f -> 'NotStartsWith', '[]')) as v
+                            where f ->> 'Field' = 'resources.ARN' and (b.arn || '/') like v || '%')
         )
     )
     select
       b.arn as resource,
       case
-        when count(bucket_selector) > 0 then 'ok'
+        when l.arn is not null then 'ok'
         else 'alarm'
       end as status,
       case
-        when count(bucket_selector) > 0 then b.name || ' object-level write events logging enabled.'
+        when l.arn is not null then b.name || ' object-level write events logging enabled.'
         else b.name || ' object-level write events logging disabled.'
       end as reason
       ${local.tag_dimensions_sql}
       ${local.common_dimensions_sql}
     from
       aws_s3_bucket as b
-      left join
-        s3_selectors
-        on bucket_selector like (b.arn || '%')
-        or bucket_selector = 'arn:aws:s3'
-    group by
-      b.account_id, b.region, b.arn, b.name, b.tags, b._ctx;
+      left join logged_buckets as l on l.arn = b.arn;
   EOQ
 }
 

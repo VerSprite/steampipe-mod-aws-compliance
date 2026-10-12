@@ -1,3 +1,20 @@
+## v1.13.1-versprite.1 [2026-10-12]
+
+VerSprite fork release, on top of upstream v1.13.1.
+
+_Bug fixes_
+
+- `opensearch_domain_audit_logging_enabled` alarms when audit logs aren't enabled or have no CloudWatch log group; it always returned `ok`. (Upstream [#1011](https://github.com/turbot/steampipe-mod-aws-compliance/pull/1011))
+- `opensearch_domain_https_required` checks the TLS policy against `opensearch_domain_tls_1_2_security_policies`; it compared it with the literal `'tlsPolicies'`, so every domain enforcing HTTPS alarmed.
+- `opensearch_domain_data_node_fault_tolerance` compares the data node count as a number, not as text. (Upstream [#1014](https://github.com/turbot/steampipe-mod-aws-compliance/pull/1014))
+- `elb_classic_lb_use_ssl_certificate` passes when every HTTPS/SSL listener uses an ACM certificate; its status was inverted. (Upstream [#1012](https://github.com/turbot/steampipe-mod-aws-compliance/pull/1012))
+- `elb_tls_listener_protocol_version`, `elb_listener_use_secure_ssl_cipher` and `elb_network_lb_tls_listener_security_policy_configured` share one list of TLS 1.2+ policies (`elb_tls_1_2_ssl_policies`, from AWS's documentation). They compared Classic LB protocol names and never alarmed, allowed only two 2017 policies (one with TLS 1.1), and had a typo (`FS-2018-0`) while accepting TLS 1.0 policies. Listeners without TLS are skipped. The recommended (TLS 1.3) policies all pass the shared list.
+- `lightsail_instance_ssh_rdp_http_ports_disabled` checks RDP on port 3389; it had 338. (Upstream [#1009](https://github.com/turbot/steampipe-mod-aws-compliance/pull/1009))
+- `elb_application_lb_redirect_http_request_to_https` passes ALBs without HTTP listeners, and alarms when any HTTP listener doesn't redirect.
+- `vpc_security_group_allows_ingress_authorized_ports` only authorizes rules for exactly TCP 80 or 443, from 0.0.0.0/0 or ::/0; a range starting at 80 passed, and IPv6 wasn't checked.
+- `s3_bucket_restrict_public_read_access` and `s3_bucket_restrict_public_write_access` judge exposure by `ignore_public_acls` / `restrict_public_buckets`, at bucket and account level. They took `block_public_acls` / `block_public_policy`, which only stop new grants, as removing existing ones, and one branch passed public-write ACLs.
+- `cloudtrail_s3_object_read_events_audit_enabled` and `cloudtrail_s3_object_write_events_audit_enabled` accept advanced event selectors, and match buckets exactly (a selector for `foobar` counted for `foo`).
+
 ## v1.13.1 [2026-10-07]
 
 _Bug fixes_

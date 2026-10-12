@@ -10,6 +10,49 @@ variable "elb_application_network_lb_https_tls_listener_recommended_ssl_policy" 
   default     = ["ELBSecurityPolicy-TLS13-1-2-2021-06", "ELBSecurityPolicy-TLS13-1-2-FIPS-2023-04" ,"ELBSecurityPolicy-TLS13-1-3-2021-06", "ELBSecurityPolicy-TLS13-1-3-FIPS-2023-04" ,"ELBSecurityPolicy-TLS13-1-2-Res-2021-06", "ELBSecurityPolicy-TLS13-1-2-Res-FIPS-2023-04"]
 }
 
+# AWS's predefined ELB security policies that allow only TLS 1.2 or newer: from the protocol tables of
+# https://docs.aws.amazon.com/elasticloadbalancing/latest/application/describe-ssl-policies.html (2026-10).
+variable "elb_tls_1_2_ssl_policies" {
+  type        = list(string)
+  description = "ELB security policies that allow only TLS 1.2 or newer."
+  default = [
+    "ELBSecurityPolicy-FS-1-2-2019-08",
+    "ELBSecurityPolicy-FS-1-2-Res-2019-08",
+    "ELBSecurityPolicy-FS-1-2-Res-2020-10",
+    "ELBSecurityPolicy-TLS-1-2-2017-01",
+    "ELBSecurityPolicy-TLS-1-2-Ext-2018-06",
+    "ELBSecurityPolicy-TLS13-1-2-2021-06",
+    "ELBSecurityPolicy-TLS13-1-2-Ext0-FIPS-2023-04",
+    "ELBSecurityPolicy-TLS13-1-2-Ext0-FIPS-PQ-2025-09",
+    "ELBSecurityPolicy-TLS13-1-2-Ext0-RFC9151-FIPS-2023-07",
+    "ELBSecurityPolicy-TLS13-1-2-Ext1-2021-06",
+    "ELBSecurityPolicy-TLS13-1-2-Ext1-FIPS-2023-04",
+    "ELBSecurityPolicy-TLS13-1-2-Ext1-FIPS-PQ-2025-09",
+    "ELBSecurityPolicy-TLS13-1-2-Ext1-PQ-2025-09",
+    "ELBSecurityPolicy-TLS13-1-2-Ext2-2021-06",
+    "ELBSecurityPolicy-TLS13-1-2-Ext2-FIPS-2023-04",
+    "ELBSecurityPolicy-TLS13-1-2-Ext2-FIPS-PQ-2025-09",
+    "ELBSecurityPolicy-TLS13-1-2-Ext2-PQ-2025-09",
+    "ELBSecurityPolicy-TLS13-1-2-FIPS-2023-04",
+    "ELBSecurityPolicy-TLS13-1-2-FIPS-PQ-2025-09",
+    "ELBSecurityPolicy-TLS13-1-2-PQ-2025-09",
+    "ELBSecurityPolicy-TLS13-1-2-RFC9151-FIPS-2023-07",
+    "ELBSecurityPolicy-TLS13-1-2-RFC9151-INTEROP1-FIPS-2023-07",
+    "ELBSecurityPolicy-TLS13-1-2-RFC9151-INTEROP2-FIPS-2023-07",
+    "ELBSecurityPolicy-TLS13-1-2-RFC9151-INTEROP3-FIPS-2023-07",
+    "ELBSecurityPolicy-TLS13-1-2-RFC9151-INTEROP4-FIPS-2023-07",
+    "ELBSecurityPolicy-TLS13-1-2-Res-2021-06",
+    "ELBSecurityPolicy-TLS13-1-2-Res-FIPS-2023-04",
+    "ELBSecurityPolicy-TLS13-1-2-Res-FIPS-PQ-2025-09",
+    "ELBSecurityPolicy-TLS13-1-2-Res-PQ-2025-09",
+    "ELBSecurityPolicy-TLS13-1-3-2021-06",
+    "ELBSecurityPolicy-TLS13-1-3-FIPS-2023-04",
+    "ELBSecurityPolicy-TLS13-1-3-FIPS-PQ-2025-09",
+    "ELBSecurityPolicy-TLS13-1-3-PQ-2025-09",
+    "ELBSecurityPolicy-TLS13-1-3-RFC9151-FIPS-2023-07",
+  ]
+}
+
 control "elb_network_lb_tls_listener_security_policy_configured" {
   title       = "ELB network load balancers should have TLS listener security policy configured"
   description = "Ensure that your Network Load Balancers (NLBs) are configured with a TLS listener security policy. Using insecure ciphers for your NLB Predefined or Custom Security Policy could make the TLS connection between the client and the load balancer vulnerable to exploits."
@@ -479,35 +522,42 @@ query "elb_application_lb_deletion_protection_enabled" {
 
 query "elb_application_lb_redirect_http_request_to_https" {
   sql = <<-EOQ
-    with detailed_listeners as (
+    with http_listeners as (
       select
-        arn,
         load_balancer_arn,
-        protocol
+        count(*) as http_listener_count,
+        count(*) filter (
+          where exists (
+            select 1
+            from jsonb_array_elements(default_actions) as ac
+            where ac ->> 'Type' = 'redirect' and ac -> 'RedirectConfig' ->> 'Protocol' = 'HTTPS'
+          )
+        ) as redirecting_count
       from
-        aws_ec2_load_balancer_listener,
-        jsonb_array_elements(default_actions) as ac
+        aws_ec2_load_balancer_listener
       where
-        split_part(arn,'/',2) = 'app'
+        split_part(arn, '/', 2) = 'app'
         and protocol = 'HTTP'
-        and ac ->> 'Type' = 'redirect'
-        and ac -> 'RedirectConfig' ->> 'Protocol' = 'HTTPS'
+      group by
+        load_balancer_arn
     )
     select
       a.arn as resource,
       case
-        when b.load_balancer_arn is null then 'alarm'
-        else 'ok'
+        when h.load_balancer_arn is null then 'ok'
+        when h.redirecting_count = h.http_listener_count then 'ok'
+        else 'alarm'
       end as status,
       case
-        when b.load_balancer_arn is not null then  a.title || ' associated with HTTP redirection.'
-        else a.title || ' not associated with HTTP redirection.'
+        when h.load_balancer_arn is null then a.title || ' has no HTTP listener.'
+        when h.redirecting_count = h.http_listener_count then a.title || ' redirects HTTP to HTTPS on all HTTP listeners.'
+        else a.title || ' has ' || (h.http_listener_count - h.redirecting_count) || ' HTTP listener(s) not redirecting to HTTPS.'
       end as reason
       ${local.tag_dimensions_sql}
       ${replace(local.common_dimensions_qualifier_sql, "__QUALIFIER__", "a.")}
     from
-      aws_ec2_application_load_balancer a
-      left join detailed_listeners b on a.arn = b.load_balancer_arn;
+      aws_ec2_application_load_balancer as a
+      left join http_listeners as h on a.arn = h.load_balancer_arn;
   EOQ
 }
 
@@ -535,25 +585,28 @@ query "elb_classic_lb_use_ssl_certificate" {
   sql = <<-EOQ
     with detailed_classic_listeners as (
       select
-        name
+        name,
+        count(*) as secure_listener_count,
+        count(*) filter (where listener_description -> 'Listener' ->> 'SSLCertificateId' like 'arn:aws:acm%') as acm_listener_count
       from
         aws_ec2_classic_load_balancer,
         jsonb_array_elements(listener_descriptions) as listener_description
       where
         listener_description -> 'Listener' ->> 'Protocol' in ('HTTPS', 'SSL', 'TLS')
-        and listener_description -> 'Listener' ->> 'SSLCertificateId' like 'arn:aws:acm%'
+      group by
+        name
     )
     select
       'arn:' || a.partition || ':elasticloadbalancing:' || a.region || ':' || a.account_id || ':loadbalancer/' || a.name as resource,
       case
         when a.listener_descriptions is null then 'skip'
-        when b.name is not null then 'alarm'
-        else 'ok'
+        when b.acm_listener_count = b.secure_listener_count then 'ok'
+        else 'alarm'
       end as status,
       case
         when a.listener_descriptions is null then a.title || ' has no listener.'
-        when b.name is not null then a.title || ' does not use certificates provided by ACM.'
-        else a.title || ' uses certificates provided by ACM.'
+        when b.acm_listener_count = b.secure_listener_count then a.title || ' uses certificates provided by ACM.'
+        else a.title || ' does not use certificates provided by ACM.'
       end as reason
       ${local.tag_dimensions_sql}
       ${local.common_dimensions_sql}
@@ -695,17 +748,25 @@ query "elb_listener_use_secure_ssl_cipher" {
     select
       load_balancer_arn as resource,
       case
-        when ssl_policy like any(array['ELBSecurityPolicy-TLS-1-2-2017-01', 'ELBSecurityPolicy-TLS-1-1-2017-01']) then 'ok'
+        when protocol not in ('HTTPS', 'TLS') then 'skip'
+        when ssl_policy = any($1::text[]) then 'ok'
         else 'alarm'
       end as status,
       case
-        when ssl_policy like any (array['ELBSecurityPolicy-TLS-1-2-2017-01', 'ELBSecurityPolicy-TLS-1-1-2017-01']) then title || ' uses secure SSL cipher.'
-        else title || ' uses insecure SSL cipher.'
+        when protocol not in ('HTTPS', 'TLS') then title || ' uses protocol ' || protocol || '.'
+        when ssl_policy = any($1::text[]) then title || ' uses secure SSL cipher.'
+        else title || ' uses insecure SSL cipher (' || coalesce(ssl_policy, 'no security policy') || ').'
       end as reason
+      ${local.tag_dimensions_sql}
       ${local.common_dimensions_sql}
     from
       aws_ec2_load_balancer_listener;
   EOQ
+
+  param "elb_tls_1_2_ssl_policies" {
+    description = "ELB security policies that allow only TLS 1.2 or newer."
+    default     = var.elb_tls_1_2_ssl_policies
+  }
 }
 
 query "elb_application_classic_network_lb_prohibit_public_access" {
@@ -927,19 +988,25 @@ query "elb_tls_listener_protocol_version" {
     select
       load_balancer_arn as resource,
       case
-        when protocol <> 'HTTPS' then 'skip'
-        when protocol = 'HTTPS' and ssl_policy like any(array['Protocol-SSLv3', 'Protocol-TLSv1']) then 'alarm'
-        else 'ok'
+        when protocol not in ('HTTPS', 'TLS') then 'skip'
+        when ssl_policy = any($1::text[]) then 'ok'
+        else 'alarm'
       end as status,
       case
-        when protocol <> 'HTTPS' then title || ' uses protocol ' || protocol || '.'
-        when ssl_policy like any (array['Protocol-SSLv3', 'Protocol-TLSv1']) then title || ' uses insecure SSL or TLS cipher.'
-        else title || ' uses secure SSL or TLS cipher.'
+        when protocol not in ('HTTPS', 'TLS') then title || ' uses protocol ' || protocol || '.'
+        when ssl_policy = any($1::text[]) then title || ' uses TLS 1.2 or newer (' || ssl_policy || ').'
+        else title || ' allows TLS older than 1.2 (' || coalesce(ssl_policy, 'no security policy') || ').'
       end as reason
+      ${local.tag_dimensions_sql}
       ${local.common_dimensions_sql}
     from
       aws_ec2_load_balancer_listener;
   EOQ
+
+  param "elb_tls_1_2_ssl_policies" {
+    description = "ELB security policies that allow only TLS 1.2 or newer."
+    default     = var.elb_tls_1_2_ssl_policies
+  }
 }
 
 query "elb_application_lb_desync_mitigation_mode" {
@@ -1063,7 +1130,7 @@ query "elb_network_lb_tls_listener_security_policy_configured" {
         aws_ec2_load_balancer_listener
       where
         protocol = 'TLS'
-        and ssl_policy not in ('ELBSecurityPolicy-2016-08', 'ELBSecurityPolicy-FS-2018-0', 'ELBSecurityPolicy-TLS13-1-2-Ext1-2021-06', 'ELBSecurityPolicy-TLS13-1-2-2021-06')
+        and (ssl_policy is null or not (ssl_policy = any($1::text[])))
       group by
         load_balancer_arn
     ), nwl_without_tls_listener as (
@@ -1095,6 +1162,11 @@ query "elb_network_lb_tls_listener_security_policy_configured" {
       aws_ec2_network_load_balancer as lb
       left join nwl_without_tls_listener as l on l.load_balancer_arn = lb.arn;
   EOQ
+
+  param "elb_tls_1_2_ssl_policies" {
+    description = "ELB security policies that allow only TLS 1.2 or newer."
+    default     = var.elb_tls_1_2_ssl_policies
+  }
 }
 
 query "ec2_classic_lb_connection_draining_enabled" {
