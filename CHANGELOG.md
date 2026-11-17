@@ -4,7 +4,7 @@ VerSprite fork release, on top of upstream v1.14.0. It carries every fork fix th
 
 _Bug fixes_
 
-- `elb_classic_lb_use_ssl_certificate` passes when every HTTPS/SSL listener uses an ACM certificate; its status was inverted. (Upstream [#1012](https://github.com/turbot/steampipe-mod-aws-compliance/pull/1012))
+- `elb_classic_lb_use_ssl_certificate` passes when every HTTPS/SSL listener uses an ACM certificate; its status was inverted. Load balancers without an HTTPS/SSL listener are skipped. (Upstream [#1012](https://github.com/turbot/steampipe-mod-aws-compliance/pull/1012))
 - `elb_tls_listener_protocol_version`, `elb_listener_use_secure_ssl_cipher` and `elb_network_lb_tls_listener_security_policy_configured` share one list of TLS 1.2+ policies (`elb_tls_1_2_ssl_policies`, from AWS's documentation). Listeners without TLS are skipped.
 - `elb_application_lb_redirect_http_request_to_https` passes ALBs without HTTP listeners, and alarms when any HTTP listener doesn't redirect.
 - `vpc_security_group_allows_ingress_authorized_ports` only authorizes rules for exactly TCP 80 or 443, from 0.0.0.0/0 or ::/0.

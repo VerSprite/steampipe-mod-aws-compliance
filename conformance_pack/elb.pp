@@ -600,11 +600,13 @@ query "elb_classic_lb_use_ssl_certificate" {
       'arn:' || a.partition || ':elasticloadbalancing:' || a.region || ':' || a.account_id || ':loadbalancer/' || a.name as resource,
       case
         when a.listener_descriptions is null then 'skip'
+        when b.name is null then 'skip'
         when b.acm_listener_count = b.secure_listener_count then 'ok'
         else 'alarm'
       end as status,
       case
         when a.listener_descriptions is null then a.title || ' has no listener.'
+        when b.name is null then a.title || ' has no HTTPS/SSL listener.'
         when b.acm_listener_count = b.secure_listener_count then a.title || ' uses certificates provided by ACM.'
         else a.title || ' does not use certificates provided by ACM.'
       end as reason
