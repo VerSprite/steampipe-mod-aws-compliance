@@ -12,6 +12,25 @@ _Bug fixes_
 - `cloudtrail_s3_object_read_events_audit_enabled` and `cloudtrail_s3_object_write_events_audit_enabled` accept advanced event selectors, and match buckets exactly.
 - `ssm_parameter_encryption_enabled` builds the parameter ARN from partition, region, account and name; the plugin's `arn` column calls `ssm:GetParameter` with decryption, which read each parameter's value only to return its ARN. The scan role doesn't need `ssm:GetParameter`.
 
+## v1.14.0 [2026-10-26]
+
+Thanks to [@cristianchiriac](https://github.com/cristianchiriac) for contributing most of the fixes in this release!
+
+_Enhancements_
+
+- Added the `opensearch_domain_uses_latest_tls_security_policy` control to the `All AWS Compliance Controls` benchmark.
+- Updated the `foundational_security_opensearch_8` control to match the current AWS Security Hub control, "Connections to OpenSearch domains should be encrypted using the latest TLS security policy". The control now passes only OpenSearch domains that enforce HTTPS and use `Policy-Min-TLS-1-2-PFS-2023-10`, which can be changed with the new `opensearch_domain_latest_tls_security_policies` variable.
+
+_Bug fixes_
+
+- Fixed the `api_gatewayv2_route_authorization_type_configured` query to alarm when a route's `authorization_type` is `NONE`. ([#1016](https://github.com/turbot/steampipe-mod-aws-compliance/pull/1016))
+- Fixed the `iam_root_last_used` query to alarm when a root access key was used in the last 90 days, instead of when it was last used more than 90 days ago. ([#1010](https://github.com/turbot/steampipe-mod-aws-compliance/pull/1010))
+- Fixed the `kinesis_stream_retention_period_168_hours` query to pass streams with a retention period longer than 168 hours. ([#1013](https://github.com/turbot/steampipe-mod-aws-compliance/pull/1013))
+- Fixed the `lightsail_instance_ssh_rdp_http_ports_disabled` query to check port `3389` instead of `338` for RDP. ([#1009](https://github.com/turbot/steampipe-mod-aws-compliance/pull/1009))
+- Fixed the `opensearch_domain_audit_logging_enabled` query always returning `ok`. OpenSearch domains without audit logging enabled now alarm. ([#1011](https://github.com/turbot/steampipe-mod-aws-compliance/pull/1011))
+- Fixed the `opensearch_domain_data_node_fault_tolerance` query comparing `InstanceCount` as text, which alarmed for domains with 10 or more data nodes. ([#1014](https://github.com/turbot/steampipe-mod-aws-compliance/pull/1014))
+- Fixed the `opensearch_domain_https_required` query comparing the TLS security policy with a literal string, which alarmed for every OpenSearch domain that enforces HTTPS. Domains now pass when they enforce HTTPS with a TLS 1.2 or later security policy. ([#1017](https://github.com/turbot/steampipe-mod-aws-compliance/pull/1017))
+
 ## v1.13.1-versprite.2 [2026-10-15]
 
 VerSprite fork release, on top of v1.13.1-versprite.1.
