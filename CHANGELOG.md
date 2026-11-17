@@ -1,3 +1,25 @@
+## v1.14.0-versprite.1 [2026-11-17]
+
+VerSprite fork release, on top of upstream v1.14.0. It carries every fork fix that upstream doesn't have yet. The Lightsail and OpenSearch fixes from v1.13.1-versprite.1 are part of upstream v1.14.0 and are no longer fork changes.
+
+_Bug fixes_
+
+- `elb_classic_lb_use_ssl_certificate` passes when every HTTPS/SSL listener uses an ACM certificate; its status was inverted. (Upstream [#1012](https://github.com/turbot/steampipe-mod-aws-compliance/pull/1012))
+- `elb_tls_listener_protocol_version`, `elb_listener_use_secure_ssl_cipher` and `elb_network_lb_tls_listener_security_policy_configured` share one list of TLS 1.2+ policies (`elb_tls_1_2_ssl_policies`, from AWS's documentation). Listeners without TLS are skipped.
+- `elb_application_lb_redirect_http_request_to_https` passes ALBs without HTTP listeners, and alarms when any HTTP listener doesn't redirect.
+- `vpc_security_group_allows_ingress_authorized_ports` only authorizes rules for exactly TCP 80 or 443, from 0.0.0.0/0 or ::/0.
+- `s3_bucket_restrict_public_read_access` and `s3_bucket_restrict_public_write_access` judge exposure by `ignore_public_acls` / `restrict_public_buckets`, at bucket and account level.
+- `cloudtrail_s3_object_read_events_audit_enabled` and `cloudtrail_s3_object_write_events_audit_enabled` accept advanced event selectors, and match buckets exactly.
+- `ssm_parameter_encryption_enabled` builds the parameter ARN from partition, region, account and name; the plugin's `arn` column calls `ssm:GetParameter` with decryption, which read each parameter's value only to return its ARN. The scan role doesn't need `ssm:GetParameter`.
+
+## v1.13.1-versprite.2 [2026-10-15]
+
+VerSprite fork release, on top of v1.13.1-versprite.1.
+
+_Bug fixes_
+
+- `ssm_parameter_encryption_enabled` builds the parameter ARN from partition, region, account and name; the plugin's `arn` column calls `ssm:GetParameter` with decryption, which read each parameter's value only to return its ARN. The scan role doesn't need `ssm:GetParameter`.
+
 ## v1.13.1-versprite.1 [2026-10-12]
 
 VerSprite fork release, on top of upstream v1.13.1.
