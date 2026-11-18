@@ -223,8 +223,10 @@ query "ssm_document_prohibit_public_access" {
 
 query "ssm_parameter_encryption_enabled" {
   sql = <<-EOQ
+    -- The ARN is built from the name: the plugin's arn column calls ssm:GetParameter, which reads the parameter's value.
     select
-      arn as resource,
+      'arn:' || partition || ':ssm:' || region || ':' || account_id || ':parameter'
+        || case when name like '/%' then name else '/' || name end as resource,
       case
         when type = 'SecureString' then 'ok'
         else 'alarm'
