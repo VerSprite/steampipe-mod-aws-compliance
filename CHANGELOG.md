@@ -1,3 +1,12 @@
+## v1.14.0-versprite.2 [2026-11-19]
+
+VerSprite fork release, on top of v1.14.0-versprite.1.
+
+_Bug fixes_
+
+- `elb_application_network_lb_https_tls_listener_recommended_security_policy` skips listeners that are not HTTPS (Application Load Balancers) or TLS (Network Load Balancers); it alarmed on them, although they have no security policy and `elb_application_network_listener_uses_secure_protocol` already reports them.
+- The default of `elb_application_network_lb_https_tls_listener_recommended_ssl_policy` is the current list of Security Hub control ELB.17. The post-quantum (`PQ-2025-09`) and RFC 9151 policies were missing, so listeners using them alarmed, and four TLS 1.2 policies that ELB.17 no longer recommends were still accepted.
+
 ## v1.14.0-versprite.1 [2026-11-17]
 
 VerSprite fork release, on top of upstream v1.14.0. It carries every fork fix that upstream doesn't have yet. The Lightsail and OpenSearch fixes from v1.13.1-versprite.1 are part of upstream v1.14.0 and are no longer fork changes.

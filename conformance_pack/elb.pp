@@ -7,7 +7,22 @@ locals {
 variable "elb_application_network_lb_https_tls_listener_recommended_ssl_policy" {
   type        = list(string)
   description = "A list of recommended SSL policies for application and network load balancers."
-  default     = ["ELBSecurityPolicy-TLS13-1-2-2021-06", "ELBSecurityPolicy-TLS13-1-2-FIPS-2023-04" ,"ELBSecurityPolicy-TLS13-1-3-2021-06", "ELBSecurityPolicy-TLS13-1-3-FIPS-2023-04" ,"ELBSecurityPolicy-TLS13-1-2-Res-2021-06", "ELBSecurityPolicy-TLS13-1-2-Res-FIPS-2023-04"]
+  # The sslPolicies parameter of Security Hub control ELB.17:
+  # https://docs.aws.amazon.com/securityhub/latest/userguide/elb-controls.html#elb-17 (2026-11).
+  default = [
+    "ELBSecurityPolicy-TLS13-1-2-FIPS-PQ-2025-09",
+    "ELBSecurityPolicy-TLS13-1-2-PQ-2025-09",
+    "ELBSecurityPolicy-TLS13-1-2-RFC9151-FIPS-2023-07",
+    "ELBSecurityPolicy-TLS13-1-2-RFC9151-INTEROP1-FIPS-2023-07",
+    "ELBSecurityPolicy-TLS13-1-2-RFC9151-INTEROP2-FIPS-2023-07",
+    "ELBSecurityPolicy-TLS13-1-2-Res-FIPS-PQ-2025-09",
+    "ELBSecurityPolicy-TLS13-1-2-Res-PQ-2025-09",
+    "ELBSecurityPolicy-TLS13-1-3-2021-06",
+    "ELBSecurityPolicy-TLS13-1-3-FIPS-2023-04",
+    "ELBSecurityPolicy-TLS13-1-3-FIPS-PQ-2025-09",
+    "ELBSecurityPolicy-TLS13-1-3-PQ-2025-09",
+    "ELBSecurityPolicy-TLS13-1-3-RFC9151-FIPS-2023-07",
+  ]
 }
 
 # AWS's predefined ELB security policies that allow only TLS 1.2 or newer: from the protocol tables of
@@ -1281,7 +1296,8 @@ query "elb_application_network_lb_https_tls_listener_recommended_security_policy
         then case when l.ssl_policy is null or not (l.ssl_policy = ANY($1::text[])) then 'alarm' else 'ok' end
       when l.lb_type = 'network' and l.protocol = 'TLS'
         then case when l.ssl_policy is null or not (l.ssl_policy = ANY($1::text[])) then 'alarm' else 'ok' end
-      else 'alarm'
+      -- Other protocols have no security policy; elb_application_network_listener_uses_secure_protocol reports them.
+      else 'skip'
     end as status,
     case
       when l.lb_type = 'application' and l.protocol = 'HTTPS' and l.ssl_policy is null
@@ -1296,10 +1312,7 @@ query "elb_application_network_lb_https_tls_listener_recommended_security_policy
         then l.title || ' listener ' || l.port || ' uses TLS with non-recommended policy ' || l.ssl_policy || '.'
       when l.lb_type = 'network' and l.protocol = 'TLS'
         then l.title || ' listener ' || l.port || ' uses TLS with recommended policy ' || l.ssl_policy || '.'
-      when l.lb_type = 'application'
-        then l.title || ' listener ' || l.port || ' uses ' || lower(l.protocol) || ' (expected HTTPS).'
-      when l.lb_type = 'network'
-        then l.title || ' listener ' || l.port || ' uses ' || lower(l.protocol) || ' (expected TLS).'
+      else l.title || ' listener ' || l.port || ' uses ' || l.protocol || ', which has no security policy.'
     end as reason
     ${local.tag_dimensions_sql}
     ${local.common_dimensions_sql}
